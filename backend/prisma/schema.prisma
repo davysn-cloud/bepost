@@ -1,0 +1,248 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN      // SMM - Pagante
+  TEAM       // Equipe (Designer, Copywriter) - Assento Grátis
+  APPROVER   // Cliente/Aprovador - Assento Grátis
+}
+
+enum PostStatus {
+  DRAFT              // Rascunho
+  IN_REVIEW_DESIGN   // Em Revisão (Design)
+  IN_REVIEW_COPY     // Em Revisão (Copy)
+  PENDING_APPROVAL   // Aprovação Final (Cliente)
+  APPROVED           // Aprovado
+  SCHEDULED          // Agendado
+  PUBLISHED          // Publicado
+  REJECTED           // Rejeitado
+}
+
+enum CommentType {
+  TEXT     // Comentário em texto
+  VISUAL   // Comentário visual (com coordenadas)
+}
+
+enum NotificationType {
+  STATUS_CHANGE
+  NEW_COMMENT
+  APPROVAL_REQUEST
+  POST_PUBLISHED
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String
+  name          String
+  role          UserRole @default(TEAM)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relacionamentos
+  memberships   OrganizationMember[]
+  createdPosts  Post[]               @relation("PostCreator")
+  comments      Comment[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  logo        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relacionamentos
+  members          OrganizationMember[]
+  instagramAccount InstagramAccount[]
+  posts            Post[]
+  auditLogs        AuditLog[]
+
+  @@index([slug])
+}
+
+model OrganizationMember {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String
+  role           UserRole @default(TEAM)
+  isPaying       Boolean  @default(false) // Se é o assento pagante (Admin/SMM)
+  joinedAt       DateTime @default(now())
+
+  // Relacionamentos
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model InstagramAccount {
+  id             String   @id @default(uuid())
+  organizationId String
+  instagramId    String   @unique // ID do Instagram
+  username       String
+  accessToken    String   // OAuth access token
+  refreshToken   String?  // OAuth refresh token
+  tokenExpiresAt DateTime
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relacionamentos
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  posts        Post[]
+
+  @@index([organizationId])
+  @@index([instagramId])
+}
+
+model Post {
+  id                 String     @id @default(uuid())
+  organizationId     String
+  instagramAccountId String
+  createdById        String
+  title              String?
+  caption            String     @db.Text // Copy/Legenda
+  hashtags           String?    // Hashtags separadas por espaço
+  status             PostStatus @default(DRAFT)
+  scheduledFor       DateTime?  // Data/hora de agendamento
+  publishedAt        DateTime?  // Data/hora real de publicação
+  instagramPostId    String?    @unique // ID do post no Instagram após publicação
+  approvalToken      String     @unique @default(uuid()) // Token para aprovação externa
+  rejectionReason    String?    @db.Text
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  // Relacionamentos
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  createdBy        User             @relation("PostCreator", fields: [createdById], references: [id])
+  media            PostMedia[]
+  comments         Comment[]
+  statusHistory    PostStatusHistory[]
+  notifications    Notification[]
+
+  @@index([organizationId])
+  @@index([instagramAccountId])
+  @@index([createdById])
+  @@index([status])
+  @@index([scheduledFor])
+  @@index([approvalToken])
+}
+
+model PostMedia {
+  id        String   @id @default(uuid())
+  postId    String
+  url       String   // URL do arquivo (S3 ou local)
+  type      String   // image/video
+  order     Int      @default(0)
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now())
+
+  // Relacionamentos
+  post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comments Comment[] @relation("MediaComments")
+
+  @@index([postId])
+}
+
+model Comment {
+  id        String      @id @default(uuid())
+  postId    String
+  mediaId   String?     // Se for comentário visual
+  userId    String
+  content   String      @db.Text
+  type      CommentType @default(TEXT)
+  posX      Float?      // Coordenada X (para comentários visuais)
+  posY      Float?      // Coordenada Y (para comentários visuais)
+  isResolved Boolean    @default(false)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  // Relacionamentos
+  post  Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  media PostMedia? @relation("MediaComments", fields: [mediaId], references: [id], onDelete: Cascade)
+  user  User       @relation(fields: [userId], references: [id])
+
+  @@index([postId])
+  @@index([mediaId])
+  @@index([userId])
+}
+
+model PostStatusHistory {
+  id        String     @id @default(uuid())
+  postId    String
+  status    PostStatus
+  changedBy String?    // User ID que mudou o status
+  notes     String?    @db.Text
+  createdAt DateTime   @default(now())
+
+  // Relacionamentos
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  postId    String?
+  type      NotificationType
+  title     String
+  message   String           @db.Text
+  isRead    Boolean          @default(false)
+  emailSent Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  // Relacionamentos
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post? @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([postId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String?
+  userId         String?
+  action         String   // CREATE_POST, UPDATE_STATUS, etc.
+  entity         String   // POST, ORGANIZATION, USER
+  entityId       String
+  changes        String?  @db.Json // JSON com as mudanças
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  // Relacionamentos
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
