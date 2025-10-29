@@ -1,8 +1,12 @@
 # 🚀 Guia de Deploy no Vercel - BePost Frontend
 
-## ⚠️ Problema: 404 NOT_FOUND
+## ⚠️ Problemas Comuns e Soluções
 
-Se você está recebendo erro 404 no Vercel, siga este guia para corrigir.
+### Erro 1: 404 NOT_FOUND
+Se você está recebendo erro 404 no Vercel, o problema é que o Root Directory não está configurado.
+
+### Erro 2: No Output Directory named "public" found
+Se você está recebendo este erro, o Vercel não está reconhecendo o projeto como Next.js. As soluções abaixo resolvem ambos os problemas.
 
 ## 📋 Solução: Configuração Correta do Vercel
 
